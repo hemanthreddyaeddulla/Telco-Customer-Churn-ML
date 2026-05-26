@@ -1,0 +1,34 @@
+# venvs
+.venv/
+venv/
+env/
+
+# OS cruft
+.DS_Store
+
+# Python cache
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Big artifacts we don't want in git
+mlruns/
+artifacts/
+data/raw/
+data/processed/
+# (serving model is no longer committed: baked at Docker build + MLflow Model Registry)
+
+# Editor / tooling cruft
+.vscode/
+.gradio/
+.coverage
+htmlcov/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# monitoring / local model registry
+logs/
+*.db
+mlflow_registry.db
+mlartifacts/

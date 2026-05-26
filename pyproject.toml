@@ -1,0 +1,40 @@
+[project]
+name = "telco-churn"
+version = "0.1.0"
+description = "Telco customer churn - end-to-end ML pipeline & serving"
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+extend-exclude = ["notebooks", "mlruns", "data", "src/serving/model"]
+
+[tool.ruff.lint]
+# pycodestyle, pyflakes, isort, pyupgrade, bugbear, comprehensions
+select = ["E", "F", "I", "UP", "B", "C4", "W"]
+ignore = ["E501", "C408"]  # E501: handled by formatter; C408: dict() kwargs are readable in fixtures
+
+[tool.ruff.lint.per-file-ignores]
+# These scripts manipulate sys.path before importing src.*, so imports are not at top.
+"scripts/run_pipeline.py" = ["E402"]
+"scripts/check_metrics.py" = ["E402"]
+"scripts/drift_report.py" = ["E402"]
+"tests/conftest.py" = ["E402"]
+
+[tool.mypy]
+python_version = "3.11"
+ignore_missing_imports = true       # no stubs for pandas/sklearn/xgboost/etc.
+warn_unused_ignores = false
+no_implicit_optional = true
+explicit_package_bases = true       # resolve src.* consistently (no "found twice")
+namespace_packages = true
+exclude = ["notebooks/", "mlruns/", "src/serving/model/"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q --disable-warnings"
+filterwarnings = ["ignore::DeprecationWarning", "ignore::UserWarning", "ignore::FutureWarning"]
+
+[tool.coverage.run]
+source = ["src"]
+omit = ["src/serving/model/*", "src/app/*"]

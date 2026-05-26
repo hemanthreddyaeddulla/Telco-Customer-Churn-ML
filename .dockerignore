@@ -1,0 +1,24 @@
+# Keep the build context lean. The image downloads the dataset at build time
+# (scripts/fetch_data.py), so the data directory is not shipped in the context.
+.git/
+.github/
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+env/
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.vscode/
+.gradio/
+.coverage
+htmlcov/
+mlruns/
+mlartifacts/
+*.db
+logs/
+notebooks/
+data/raw/
+data/processed/
+tests/

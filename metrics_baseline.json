@@ -1,0 +1,5 @@
+{
+  "roc_auc_min": 0.77,
+  "recall_min": 0.68,
+  "_note": "CI fails if a freshly trained model scores below these floors (model-quality regression gate). Conservative floors; raise after establishing a stable champion."
+}
