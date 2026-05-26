@@ -24,7 +24,8 @@ The public IBM Telco Customer Churn dataset: 7,043 customers and 21 columns cove
 demographics, the services each customer subscribes to, and account and billing
 information, with a binary `Churn` label. About 26.5% of customers churned. The data is
 not committed to the repository; download it with `python scripts/fetch_data.py`, which
-saves it to `data/raw/`.
+saves it to `data/raw/`. Source:
+[IBM/telco-customer-churn-on-icp4d](https://github.com/IBM/telco-customer-churn-on-icp4d).
 
 ## Approach
 
@@ -43,7 +44,61 @@ saves it to `data/raw/`.
 6. Explainability: every prediction returns the top SHAP drivers and a suggested action.
 7. Serving: a FastAPI service with a Gradio web interface, packaged with Docker.
 
-## Key design decisions
+## How a prediction becomes a decision
+
+This is the core of the project, so it is worth spelling out end to end.
+
+### Calibrated probabilities (why isotonic regression on a classifier)
+
+XGBoost already outputs a number between 0 and 1, and log loss is the training objective that
+pushes it toward probability-like values. So why add calibration? Because this project sets
+`scale_pos_weight` to handle the class imbalance (~26% churn), which deliberately makes the
+model over-predict churn. The result is a good *ranking* but an inflated *probability*: a raw
+0.55 can correspond to a real churn rate of only ~34%. Log loss does not fix this, because the
+class reweighting shifts the base rate the model effectively learns.
+
+Isotonic regression here is a post-processing step, not the classifier itself. It learns a
+single monotonic mapping (`raw score -> true probability`) on held-out folds. Because the
+mapping is monotonic it never reorders customers, so ROC-AUC is unchanged; it only corrects the
+values so that "the model says 34%" really means "about 34 out of 100 such customers churn".
+That matters because the next step multiplies the probability by dollar amounts.
+
+### The decision threshold (cost-based, derived, not a fixed 0.5)
+
+A default 0.5 cut-off quietly assumes a false alarm costs the same as a missed churner. They are
+very different, so each outcome is given a dollar value (`src/models/threshold.py`):
+
+| Outcome | Meaning | Value |
+|---|---|---|
+| True positive  | flag a real churner   | `save_rate*CLV - cost` = +$100 |
+| False positive | flag a loyal customer | `-cost` = -$200 |
+| False negative | miss a churner        | `-CLV` = -$1000 |
+| True negative  | correctly ignore      | $0 |
+
+The training script computes the total expected dollar value at every candidate threshold (a
+grid from 0.05 to 0.95) on a validation split and picks the one that maximises money. With these
+costs that reduces to a simple break-even:
+
+```
+act on a customer when   p * CLV * (1 + save_rate) > cost
+                  =>      p > cost / (CLV * (1 + save_rate)) = 200 / (1000 * 1.30) ~= 0.15
+```
+
+which is why the chosen threshold is about 0.14. It is low because missing a churner (-$1000) is
+roughly five times more costly than a wasted offer (-$200), so it pays to contact a customer
+even at a modest churn probability. That is also why recall is high (0.91 on the test set).
+
+The threshold is **derived, not assumed**: change the economics (`--clv`, `--retention_cost`,
+`--save_rate`) and it moves. It is computed once at training, saved in `feature_contract.json`,
+and loaded at serving, so every request uses that same value (it does not recompute per request).
+
+### Explanations
+
+Every prediction returns the top SHAP drivers, aggregated per original feature and labelled with
+the customer's actual value (for example "Contract = Month-to-month"), plus a retention action
+tied to the strongest churn-increasing driver.
+
+## Engineering and MLOps decisions
 
 - One fitted pipeline for both training and serving. The saved model is a single
   `Pipeline` that accepts the raw customer columns, so the serving code does not
@@ -51,10 +106,6 @@ saves it to `data/raw/`.
   time with `get_dummies(drop_first=True)` collapses a category to its dropped reference
   (for example, a fiber-optic customer being scored as DSL). On the holdout set that naive
   approach would change the prediction for roughly 1 in 4 customers.
-- Calibrated probabilities. `scale_pos_weight` helps the tree handle the class imbalance
-  but inflates its probabilities; isotonic calibration maps them back, so a predicted 34%
-  means an actual 34%. With calibrated probabilities the cost-based threshold lands at the
-  economic break-even point.
 - A pandera schema validates incoming data (allowed category values, numeric ranges) and
   is also reused as a test fixture.
 - A CI quality gate. The GitHub Actions workflow runs ruff, mypy and the test suite, then
@@ -135,6 +186,36 @@ python scripts/fetch_data.py                 # downloads the dataset to data/raw
 python scripts/run_pipeline.py --input data/raw/WA_Fn-UseC_-Telco-Customer-Churn.csv
 python -m uvicorn src.app.main:app --port 8000
 # open http://localhost:8000 for the app and http://localhost:8000/docs for the API
+```
+
+### Calling the API
+
+```bash
+curl -X POST http://localhost:8000/predict -H "Content-Type: application/json" -d '{
+  "gender": "Female", "SeniorCitizen": 1, "Partner": "No", "Dependents": "No",
+  "PhoneService": "Yes", "MultipleLines": "No", "InternetService": "Fiber optic",
+  "OnlineSecurity": "No", "OnlineBackup": "No", "DeviceProtection": "No",
+  "TechSupport": "No", "StreamingTV": "Yes", "StreamingMovies": "Yes",
+  "Contract": "Month-to-month", "PaperlessBilling": "Yes",
+  "PaymentMethod": "Electronic check", "tenure": 1,
+  "MonthlyCharges": 85.0, "TotalCharges": 85.0
+}'
+```
+
+Response:
+
+```json
+{
+  "prediction": "Likely to churn",
+  "churn_probability": 0.82,
+  "threshold": 0.14,
+  "top_drivers": [
+    {"feature": "Contract = Month-to-month", "impact": 0.86, "direction": "increases churn"},
+    {"feature": "tenure", "impact": 0.84, "direction": "increases churn"},
+    {"feature": "InternetService = Fiber optic", "impact": 0.33, "direction": "increases churn"}
+  ],
+  "recommended_action": "Offer a discounted 1- or 2-year contract to lock in the customer."
+}
 ```
 
 Quality checks:
