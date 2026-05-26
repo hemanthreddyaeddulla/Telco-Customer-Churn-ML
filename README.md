@@ -67,11 +67,37 @@ saves it to `data/raw/`.
 
 ## Results
 
-- RandomForest, LightGBM and XGBoost all reach about 0.83 ROC-AUC on the holdout set.
-- The Optuna-tuned, calibrated XGBoost reaches about 0.85 ROC-AUC, catching about 85% of
-  churners at the chosen threshold.
-- The goal here is not a higher AUC (calibration does not change ranking). The value is in
-  serving correctness, calibrated probabilities, a cost-based decision, and explanations.
+All models are evaluated on the same untouched holdout set (1,409 customers, 20% of the data).
+
+Model comparison (ROC-AUC on the holdout):
+
+| Model                                | ROC-AUC |
+|--------------------------------------|---------|
+| RandomForest                         | 0.823   |
+| LightGBM                             | 0.829   |
+| XGBoost (default params)             | 0.825   |
+| XGBoost (Optuna-tuned + calibrated)  | 0.848   |
+
+Final model, train vs test (at the cost-optimal threshold of 0.14):
+
+| Set            | ROC-AUC | Recall (churn) | Precision (churn) | F1    |
+|----------------|---------|----------------|-------------------|-------|
+| Train (n=5,634)| 0.877   | 0.933          | 0.463             | 0.619 |
+| Test  (n=1,409)| 0.848   | 0.906          | 0.451             | 0.603 |
+
+The small train-to-test gap (0.877 vs 0.848 ROC-AUC) shows the model is well regularized and
+not overfit. The cost-based threshold deliberately favours recall (0.906 on the test set):
+missing a churner who would have stayed is far more expensive than sending one unnecessary
+retention offer, and the expected-value calculation makes that trade-off explicit.
+
+The goal here is not a higher AUC (calibration does not change the ranking, so it does not
+move ROC-AUC). The value is in serving correctness, calibrated probabilities you can trust as
+real percentages, a cost-based decision, and per-prediction explanations.
+
+The numbers above use the Optuna-tuned model (`run_pipeline.py --tune`, what the notebook
+runs). The Docker build and the CI gate use the faster untuned run (`--no_tune`, fixed
+default params), which scores about 0.834 ROC-AUC; the CI gate only checks the score stays
+above a committed floor.
 
 ## Repository structure
 
@@ -141,3 +167,7 @@ pytest, ruff, mypy, Docker, GitHub Actions.
   confidence intervals.
 - The free demo runs on a small CPU instance and sleeps when idle, then wakes on the next
   visit.
+
+## License
+
+Released under the MIT License. See [LICENSE](LICENSE).
