@@ -58,17 +58,25 @@ def main(args):
     print(f"Space ready: https://huggingface.co/spaces/{repo_id}")
 
     with tempfile.TemporaryDirectory() as tmp:
-        for item in INCLUDE:
-            src = os.path.join(ROOT, item)
-            dst = os.path.join(tmp, item)
-            if os.path.isdir(src):
-                shutil.copytree(
-                    src, dst, ignore=shutil.ignore_patterns("__pycache__", "*.pyc")
-                )
-            else:
-                shutil.copy2(src, dst)
-        # HF requires a capital-D Dockerfile and a README.md carrying the Space metadata.
-        shutil.copy2(os.path.join(ROOT, "dockerfile"), os.path.join(tmp, "Dockerfile"))
+        if args.image:
+            # Serve a pre-built public image (e.g. from Docker Hub): HF just pulls and runs
+            # it, with no training during the Space build. The image already carries the app,
+            # the trained model and the CMD/EXPOSE, so the Space Dockerfile is a single line.
+            # Use this when the full --tune build is too heavy for HF's free build tier.
+            with open(os.path.join(tmp, "Dockerfile"), "w", encoding="utf-8") as f:
+                f.write(f"FROM {args.image}\n")
+        else:
+            for item in INCLUDE:
+                src = os.path.join(ROOT, item)
+                dst = os.path.join(tmp, item)
+                if os.path.isdir(src):
+                    shutil.copytree(
+                        src, dst, ignore=shutil.ignore_patterns("__pycache__", "*.pyc")
+                    )
+                else:
+                    shutil.copy2(src, dst)
+            # HF requires a capital-D Dockerfile and a README.md carrying the Space metadata.
+            shutil.copy2(os.path.join(ROOT, "dockerfile"), os.path.join(tmp, "Dockerfile"))
         with open(os.path.join(tmp, "README.md"), "w", encoding="utf-8") as f:
             f.write(HF_README)
         api.upload_folder(folder_path=tmp, repo_id=repo_id, repo_type="space")
@@ -81,4 +89,10 @@ if __name__ == "__main__":
     p = argparse.ArgumentParser(description="Deploy to a free Hugging Face Space")
     p.add_argument("--user", required=True, help="your Hugging Face username")
     p.add_argument("--name", default="telco-churn", help="Space name")
+    p.add_argument(
+        "--image",
+        default=None,
+        help="serve a pre-built public image (e.g. youruser/telco-churn:latest) instead of "
+        "training during the HF build",
+    )
     main(p.parse_args())
