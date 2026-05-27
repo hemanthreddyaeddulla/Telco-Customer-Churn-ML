@@ -230,9 +230,10 @@ python scripts/check_metrics.py
 ## Deployment
 
 The app is containerised (`dockerfile`); the image downloads the data and trains the model
-at build time, then serves it. A GitHub Actions workflow builds and publishes the image to
-Docker Hub. The public demo is hosted for free on Hugging Face Spaces (created with
-`scripts/deploy_hf.py`).
+at build time, then serves it. A GitHub Actions workflow (`deploy.yml`) builds and publishes
+the image to Docker Hub. The public Hugging Face Spaces demo then **pulls that pre-built image**
+(`scripts/deploy_hf.py --image <user>/telco-churn:latest`), so the exact same artifact is served
+everywhere (build once, deploy anywhere) instead of retraining on the demo host.
 
 ## Tech stack
 
@@ -246,6 +247,11 @@ pytest, ruff, mypy, Docker, GitHub Actions.
   business.
 - The reported numbers come from a single train/test split; cross-validation would add
   confidence intervals.
+- The cost-based threshold is recomputed from the validation set on every training run, and
+  gradient boosting is not bitwise-deterministic across machines, so the exact value can shift
+  slightly by environment (about 0.14 locally, 0.21 in the published image) even though the model
+  quality (ROC-AUC ~0.85) is unchanged. The shipped Docker image is one fixed artifact, so every
+  deployment of it behaves identically.
 - The free demo runs on a small CPU instance and sleeps when idle, then wakes on the next
   visit.
 
